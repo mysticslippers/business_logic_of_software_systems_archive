@@ -1,0 +1,92 @@
+CREATE TYPE BANK_PAYMENT_STATUS AS ENUM(
+    'CREATED',
+    'PAID',
+    'FAILED',
+    'EXPIRED',
+    'CANCELED'
+);
+
+CREATE TYPE BANK_OUTBOX_STATUS AS ENUM(
+    'NEW',
+    'SENT',
+    'ERROR'
+);
+
+CREATE TYPE BANK_ATTEMPT_RESULT AS ENUM(
+    'SUCCESS',
+    'FAIL'
+);
+
+CREATE TABLE IF NOT EXISTS BANK_PAYMENTS(
+    id BIGSERIAL PRIMARY KEY,
+
+    amount_cents INTEGER NOT NULL CONSTRAINT non_negative_amount CHECK (amount_cents >= 0),
+    currency CHAR(3) NOT NULL,
+
+    status BANK_PAYMENT_STATUS NOT NULL DEFAULT 'CREATED',
+
+    client_reference VARCHAR(128) NOT NULL,
+    description TEXT,
+
+    payment_token VARCHAR(128) NOT NULL UNIQUE,
+
+    expires_at TIMESTAMPTZ NOT NULL,
+    paid_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT paid_at_only_when_paid CHECK (
+        paid_at IS NULL OR status = 'PAID'
+    )
+);
+
+CREATE TABLE IF NOT EXISTS BANK_PAYMENT_ATTEMPTS(
+    id BIGSERIAL PRIMARY KEY,
+
+    bank_payment_id BIGINT NOT NULL REFERENCES BANK_PAYMENTS (id) ON DELETE CASCADE,
+
+    attempt_no INTEGER NOT NULL,
+    result BANK_ATTEMPT_RESULT NOT NULL,
+
+    fail_reason TEXT,
+    raw_payload JSONB,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT positive_attempt_no CHECK (attempt_no > 0),
+    CONSTRAINT readable_fail_reason CHECK (fail_reason IS NULL OR char_length(fail_reason) <= 500)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IDX_BANK_ATTEMPT_NO_PER_PAYMENT
+ON BANK_PAYMENT_ATTEMPTS USING btree (bank_payment_id, attempt_no);
+
+CREATE TABLE IF NOT EXISTS BANK_OUTBOX_EVENTS(
+    id BIGSERIAL PRIMARY KEY,
+
+    event_id VARCHAR(128),
+    event_type VARCHAR(64) NOT NULL,
+
+    bank_payment_id BIGINT NOT NULL REFERENCES BANK_PAYMENTS (id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+
+    status BANK_OUTBOX_STATUS NOT NULL DEFAULT 'NEW',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT non_negative_attempts CHECK (attempts >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_STATUS ON BANK_PAYMENTS USING btree (status);
+CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_CLIENT_REFERENCE ON BANK_PAYMENTS USING btree (client_reference);
+CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_EXPIRES_AT ON BANK_PAYMENTS USING btree (expires_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IDX_BANK_OUTBOX_EVENT_ID
+ON BANK_OUTBOX_EVENTS USING btree (event_id)
+WHERE event_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS IDX_BANK_OUTBOX_STATUS
+ON BANK_OUTBOX_EVENTS USING btree (status, created_at);
