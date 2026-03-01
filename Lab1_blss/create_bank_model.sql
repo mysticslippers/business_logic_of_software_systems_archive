@@ -1,92 +1,117 @@
-CREATE TYPE BANK_PAYMENT_STATUS AS ENUM(
-    'CREATED',
+CREATE TYPE PROVIDER_PAYMENT_STATUS AS ENUM (
+    'NEW',
+    'WAITING_FOR_USER',
+    'PROCESSING',
     'PAID',
     'FAILED',
-    'EXPIRED',
-    'CANCELED'
+    'EXPIRED'
 );
 
-CREATE TYPE BANK_OUTBOX_STATUS AS ENUM(
+CREATE TYPE PROVIDER_WEBHOOK_STATUS AS ENUM (
     'NEW',
     'SENT',
-    'ERROR'
+    'FAILED'
 );
 
-CREATE TYPE BANK_ATTEMPT_RESULT AS ENUM(
+CREATE TABLE IF NOT EXISTS MERCHANTS (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    api_key VARCHAR(255) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_api_key
+    ON MERCHANTS USING btree (api_key);
+
+CREATE TABLE IF NOT EXISTS PROVIDER_PAYMENTS (
+    id BIGSERIAL PRIMARY KEY,
+
+    merchant_id BIGINT REFERENCES MERCHANTS (id) ON DELETE RESTRICT,
+
+    merchant_payment_ref VARCHAR(255) NOT NULL,
+
+    amount_cents INT NOT NULL CONSTRAINT provider_non_negative_amount CHECK (amount_cents >= 0),
+    currency CHAR(3) NOT NULL DEFAULT 'RUB',
+
+    status PROVIDER_PAYMENT_STATUS NOT NULL DEFAULT 'NEW',
+
+    retry_count SMALLINT NOT NULL DEFAULT 0 CONSTRAINT provider_non_negative_retry CHECK (retry_count >= 0),
+    max_retries SMALLINT NOT NULL DEFAULT 3 CONSTRAINT provider_non_negative_max_retry CHECK (max_retries >= 0),
+
+    payment_url TEXT NOT NULL,
+
+    expires_at TIMESTAMP,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT provider_unique_payment_ref_per_merchant UNIQUE (merchant_id, merchant_payment_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_payments_merchant_id
+    ON PROVIDER_PAYMENTS USING btree (merchant_id);
+
+CREATE INDEX IF NOT EXISTS idx_provider_payments_status
+    ON PROVIDER_PAYMENTS USING btree (status);
+
+CREATE INDEX IF NOT EXISTS idx_provider_payments_expires_at
+    ON PROVIDER_PAYMENTS USING btree (expires_at);
+
+CREATE TYPE PROVIDER_ATTEMPT_STATUS AS ENUM (
+    'STARTED',
     'SUCCESS',
-    'FAIL'
+    'ERROR',
+    'TIMEOUT'
 );
 
-CREATE TABLE IF NOT EXISTS BANK_PAYMENTS(
+CREATE TABLE IF NOT EXISTS PROVIDER_PAYMENT_ATTEMPTS (
     id BIGSERIAL PRIMARY KEY,
+    payment_id BIGINT REFERENCES PROVIDER_PAYMENTS (id) ON DELETE CASCADE,
 
-    amount_cents INTEGER NOT NULL CONSTRAINT non_negative_amount CHECK (amount_cents >= 0),
-    currency CHAR(3) NOT NULL,
+    attempt_no SMALLINT NOT NULL CONSTRAINT provider_attempt_no_positive CHECK (attempt_no >= 1),
+    status PROVIDER_ATTEMPT_STATUS NOT NULL,
 
-    status BANK_PAYMENT_STATUS NOT NULL DEFAULT 'CREATED',
+    error_code VARCHAR(64),
+    error_message TEXT,
 
-    client_reference VARCHAR(128) NOT NULL,
-    description TEXT,
+    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP,
 
-    payment_token VARCHAR(128) NOT NULL UNIQUE,
-
-    expires_at TIMESTAMPTZ NOT NULL,
-    paid_at TIMESTAMPTZ,
-
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT paid_at_only_when_paid CHECK (
-        paid_at IS NULL OR status = 'PAID'
-    )
+    CONSTRAINT provider_unique_attempt_no UNIQUE (payment_id, attempt_no)
 );
 
-CREATE TABLE IF NOT EXISTS BANK_PAYMENT_ATTEMPTS(
-    id BIGSERIAL PRIMARY KEY,
+CREATE INDEX IF NOT EXISTS idx_provider_payment_attempts_payment_id
+    ON PROVIDER_PAYMENT_ATTEMPTS USING btree (payment_id);
 
-    bank_payment_id BIGINT NOT NULL REFERENCES BANK_PAYMENTS (id) ON DELETE CASCADE,
-
-    attempt_no INTEGER NOT NULL,
-    result BANK_ATTEMPT_RESULT NOT NULL,
-
-    fail_reason TEXT,
-    raw_payload JSONB,
-
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT positive_attempt_no CHECK (attempt_no > 0),
-    CONSTRAINT readable_fail_reason CHECK (fail_reason IS NULL OR char_length(fail_reason) <= 500)
+CREATE TYPE PROVIDER_WEBHOOK_EVENT AS ENUM (
+    'PAYMENT_PAID',
+    'PAYMENT_FAILED',
+    'PAYMENT_EXPIRED'
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IDX_BANK_ATTEMPT_NO_PER_PAYMENT
-ON BANK_PAYMENT_ATTEMPTS USING btree (bank_payment_id, attempt_no);
-
-CREATE TABLE IF NOT EXISTS BANK_OUTBOX_EVENTS(
+CREATE TABLE IF NOT EXISTS PROVIDER_WEBHOOK_OUTBOX (
     id BIGSERIAL PRIMARY KEY,
+    payment_id BIGINT REFERENCES PROVIDER_PAYMENTS (id) ON DELETE CASCADE,
 
-    event_id VARCHAR(128),
-    event_type VARCHAR(64) NOT NULL,
+    event_type PROVIDER_WEBHOOK_EVENT NOT NULL,
+    target_url TEXT NOT NULL,
 
-    bank_payment_id BIGINT NOT NULL REFERENCES BANK_PAYMENTS (id) ON DELETE CASCADE,
-    payload JSONB NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    status BANK_OUTBOX_STATUS NOT NULL DEFAULT 'NEW',
-    attempts INTEGER NOT NULL DEFAULT 0,
+    status PROVIDER_WEBHOOK_STATUS NOT NULL DEFAULT 'NEW',
+    attempts SMALLINT NOT NULL DEFAULT 0 CONSTRAINT provider_webhook_attempts_non_negative CHECK (attempts >= 0),
+
     last_error TEXT,
+    last_attempt_at TIMESTAMP,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT non_negative_attempts CHECK (attempts >= 0)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_STATUS ON BANK_PAYMENTS USING btree (status);
-CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_CLIENT_REFERENCE ON BANK_PAYMENTS USING btree (client_reference);
-CREATE INDEX IF NOT EXISTS IDX_BANK_PAYMENTS_EXPIRES_AT ON BANK_PAYMENTS USING btree (expires_at);
+CREATE INDEX IF NOT EXISTS idx_provider_webhook_outbox_status
+    ON PROVIDER_WEBHOOK_OUTBOX USING btree (status);
 
-CREATE UNIQUE INDEX IF NOT EXISTS IDX_BANK_OUTBOX_EVENT_ID
-ON BANK_OUTBOX_EVENTS USING btree (event_id)
-WHERE event_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS IDX_BANK_OUTBOX_STATUS
-ON BANK_OUTBOX_EVENTS USING btree (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_provider_webhook_outbox_payment_id
+    ON PROVIDER_WEBHOOK_OUTBOX USING btree (payment_id);
