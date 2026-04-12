@@ -1,0 +1,91 @@
+spring:
+  application:
+    name: application
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.hibernate.SQL: INFO
+    org.hibernate.type.descriptor.sql.BasicBinder: INFO
+
+---
+spring:
+  jackson:
+    time-zone: UTC
+  config:
+    activate:
+      on-profile: local
+
+  mvc:
+    servlet:
+      path: /api
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/studs
+    username: s368530
+    password: P7Woe7Cwyk2MjZnN
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: app-hikari
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+bank:
+  base-url: http://localhost:1489
+  callback-url: http://localhost:1488/api/payments/webhook
+
+---
+spring:
+  jackson:
+    time-zone: UTC
+  config:
+    activate:
+      on-profile: helios
+
+  mvc:
+    servlet:
+      path: /api
+
+  datasource:
+    url: jdbc:postgresql://pg:5432/studs
+    username: s368530
+    password: P7Woe7Cwyk2MjZnN
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: app-hikari
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+bank:
+  base-url: http://localhost:1489
+  callback-url: http://localhost:1488/api/payments/webhook
