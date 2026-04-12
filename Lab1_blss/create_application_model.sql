@@ -1,71 +1,67 @@
-CREATE TYPE ENROLLMENT_STATUS AS ENUM(
-    'PENDING_PAYMENT',
-    'ACTIVE',
-    'REJECTED'
-);
-
-CREATE TYPE PAYMENT_STATUS AS ENUM(
-    'NEW',
-    'PAID',
-    'FAILED',
-    'EXPIRED'
-);
-
-CREATE TABLE IF NOT EXISTS USERS(
+CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
-    full_name VARCHAR(255),
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT valid_email CHECK (email ~ '^[a-zA-Z0-9.!#$%&''*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$')
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON USERS USING btree (email);
-
-CREATE TABLE IF NOT EXISTS COURSES(
+CREATE TABLE courses (
     id BIGSERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     description TEXT,
-    price_cents INT NOT NULL CONSTRAINT non_negative_price CHECK (price_cents >= 0),
-    currency CHAR(3) NOT NULL DEFAULT 'RUB',
+    price NUMERIC(12, 2) NOT NULL CHECK (price >= 0),
+    currency VARCHAR(3) NOT NULL DEFAULT 'RUB',
+    capacity INTEGER NOT NULL CHECK (capacity > 0),
+    available_places INTEGER NOT NULL CHECK (available_places >= 0),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_courses_available_places_capacity
+        CHECK (available_places <= capacity)
 );
 
-CREATE INDEX IF NOT EXISTS idx_courses_is_active ON COURSES USING btree (is_active);
-
-CREATE TABLE IF NOT EXISTS ENROLLMENTS(
+CREATE TABLE enrollments (
     id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES USERS (id) ON DELETE RESTRICT,
-    course_id BIGINT REFERENCES COURSES (id) ON DELETE RESTRICT,
-    status ENROLLMENT_STATUS NOT NULL,
-    reject_reason TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_enrollments_user_id ON ENROLLMENTS USING btree (user_id);
-CREATE INDEX IF NOT EXISTS idx_enrollments_course_id ON ENROLLMENTS USING btree (course_id);
-CREATE INDEX IF NOT EXISTS idx_enrollments_status ON ENROLLMENTS USING btree (status);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_open_enrollment
-ON ENROLLMENTS USING btree (user_id, course_id)
-WHERE status IN ('PENDING_PAYMENT', 'ACTIVE');
-
-CREATE TABLE IF NOT EXISTS PAYMENTS(
-    id BIGSERIAL PRIMARY KEY,
-    enrollment_id BIGINT REFERENCES ENROLLMENTS (id) ON DELETE CASCADE,
-    provider_payment_id VARCHAR(255) UNIQUE,
-    amount_cents INT NOT NULL CONSTRAINT non_negative_amount CHECK (amount_cents >= 0),
-    currency CHAR(3) NOT NULL DEFAULT 'RUB',
-    status PAYMENT_STATUS NOT NULL,
-    retry_count SMALLINT NOT NULL DEFAULT 0 CONSTRAINT non_negative_retry CHECK (retry_count >= 0),
-    max_retries SMALLINT NOT NULL DEFAULT 3 CONSTRAINT non_negative_max_retry CHECK (max_retries >= 0),
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    course_id BIGINT NOT NULL REFERENCES courses(id),
+    status VARCHAR(32) NOT NULL,
+    rejection_reason VARCHAR(255),
+    payment_expires_at TIMESTAMP,
+    activated_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unique_payment_per_enrollment UNIQUE (enrollment_id)
+    CONSTRAINT chk_enrollments_status
+        CHECK (status IN (
+            'PENDING_PAYMENT',
+            'ACTIVE',
+            'REJECTED',
+            'PAYMENT_FAILED',
+            'PAYMENT_EXPIRED'
+        ))
 );
 
-CREATE INDEX IF NOT EXISTS idx_payments_status ON PAYMENTS USING btree (status);
-CREATE INDEX IF NOT EXISTS idx_payments_provider_payment_id ON PAYMENTS USING btree (provider_payment_id);
+CREATE TABLE payments (
+    id BIGSERIAL PRIMARY KEY,
+    enrollment_id BIGINT NOT NULL UNIQUE REFERENCES enrollments(id),
+    provider_payment_id VARCHAR(100) NOT NULL UNIQUE,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+    currency VARCHAR(3) NOT NULL DEFAULT 'RUB',
+    status VARCHAR(32) NOT NULL,
+    payment_url TEXT NOT NULL,
+    failure_reason VARCHAR(255),
+    expires_at TIMESTAMP NOT NULL,
+    paid_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_payments_status
+        CHECK (status IN ('CREATED', 'PENDING', 'PAID', 'FAILED', 'EXPIRED'))
+);
+
+CREATE INDEX idx_courses_is_active ON courses(is_active);
+CREATE INDEX idx_enrollments_user_id ON enrollments(user_id);
+CREATE INDEX idx_enrollments_course_id ON enrollments(course_id);
+CREATE INDEX idx_enrollments_status ON enrollments(status);
+CREATE INDEX idx_enrollments_payment_expires_at ON enrollments(payment_expires_at);
+CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_payments_expires_at ON payments(expires_at);
