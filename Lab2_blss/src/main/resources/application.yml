@@ -1,0 +1,121 @@
+spring:
+  application:
+    name: application
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.hibernate.SQL: INFO
+    org.hibernate.type.descriptor.sql.BasicBinder: INFO
+
+---
+spring:
+  jackson:
+    time-zone: UTC
+  config:
+    activate:
+      on-profile: local
+
+  mvc:
+    servlet:
+      path: /api
+
+  datasource:
+    xa:
+      data-source-class-name: org.postgresql.xa.PGXADataSource
+      unique-resource-name: application_database
+      min-pool-size: 2
+      max-pool-size: 10
+      borrow-connection-timeout: 30
+      max-idle-time: 60
+      maintenance-interval: 60
+      test-query: SELECT 1
+      properties:
+        user: s368530
+        password: P7Woe7Cwyk2MjZnN
+        serverName: localhost
+        portNumber: 5432
+        databaseName: studs
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        transaction:
+          coordinator_class: jta
+        jta:
+          platform: org.hibernate.engine.transaction.jta.platform.internal.AtomikosJtaPlatform
+
+atomikos:
+  properties:
+    max-timeout: 300000
+    default-jta-timeout: 30000
+    log-base-dir: ./atomikos-log
+    enable-logging: true
+
+bank:
+  base-url: http://localhost:1489
+  callback-url: http://localhost:1488/api/payments/webhook
+
+---
+spring:
+  jackson:
+    time-zone: UTC
+  config:
+    activate:
+      on-profile: helios
+
+  mvc:
+    servlet:
+      path: /api
+
+  datasource:
+    xa:
+      data-source-class-name: org.postgresql.xa.PGXADataSource
+      unique-resource-name: application_database
+      min-pool-size: 2
+      max-pool-size: 10
+      borrow-connection-timeout: 30
+      max-idle-time: 60
+      maintenance-interval: 60
+      test-query: SELECT 1
+      properties:
+        user: s368530
+        password: P7Woe7Cwyk2MjZnN
+        serverName: pg
+        portNumber: 5432
+        databaseName: studs
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        transaction:
+          coordinator_class: jta
+        jta:
+          platform: org.hibernate.engine.transaction.jta.platform.internal.AtomikosJtaPlatform
+
+atomikos:
+  properties:
+    max-timeout: 300000
+    default-jta-timeout: 30000
+    log-base-dir: ./atomikos-log
+    enable-logging: true
+
+bank:
+  base-url: http://localhost:1489
+  callback-url: http://localhost:1488/api/payments/webhook
